@@ -669,18 +669,17 @@ class _ContextPreservedAsyncGeneratorWrapper:
         return self
 
     async def __anext__(self) -> Any:
+        tokens = []
         try:
-            # Run the generator's __anext__ in the preserved context
-            try:
-                # Python 3.10+ approach with context parameter
-                item = await asyncio.create_task(
-                    self.generator.__anext__(),  # type: ignore
-                    context=self.context,
-                )  # type: ignore
-            except TypeError:
-                # Python < 3.10 fallback - context parameter not supported
-                item = await self.generator.__anext__()
 
+            # Load the context.
+            # We were using asyncio.create_task before, but this would confuse anyio context managers
+            # RuntimeError "Attempted to exit cancel scope in a different task than it was entered in"
+            if self.context:
+                for var, value in self.context.items():
+                    tokens.append((var, var.set(value)))
+
+            item = await self.generator.__anext__()
             self.items.append(item)
 
             return item
@@ -695,6 +694,10 @@ class _ContextPreservedAsyncGeneratorWrapper:
             )
 
             raise
+        finally:
+            for var, token in tokens:
+                var.reset(token)
+
 
     async def aclose(self) -> None:
         tokens = []
